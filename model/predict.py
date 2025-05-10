@@ -44,11 +44,9 @@ def predict_price(input_data):
             start_idx += n_values
         
         # Add derived features
-        df['Area_Bathrooms'] = df['Area'] * df['Bathrooms']
         df['Area_Floors'] = df['Area'] * df['Floors']
         df['Frontage_AccessRoad'] = df['Frontage'] * df['Access Road']
         df['Log_Area'] = np.log1p(df['Area'])
-        df['Area_per_room'] = df['Area'] / (df['Bedrooms'] + df['Bathrooms'])
         df['Total_Rooms'] = df['Bedrooms'] + df['Bathrooms']
         
         # Make prediction (model will handle log transformation internally)

@@ -62,7 +62,6 @@ print("\n===== Bước 5: Tạo biến phụ thuộc (Y) =====")
 df['Log_Price'] = np.log1p(df['Price'])  # log(1+x) để tránh lỗi khi giá trị = 0
 print(f"Đã chuyển đổi biến Price sang Log_Price để giảm độ lệch")
 
-df['Area_Bathrooms'] = df['Area'] * df['Bathrooms']
 df['Area_Floors'] = df['Area'] * df['Floors']
 df['Frontage_AccessRoad'] = df['Frontage'] * df['Access Road']
 
@@ -71,14 +70,13 @@ df['Log_Area'] = np.log1p(df['Area'])
 df['Log_Price'] = np.log1p(df['Price'])
 
 # Add derived features
-df['Area_per_room'] = df['Area'] / (df['Bedrooms'] + df['Bathrooms'])
 df['Total_Rooms'] = df['Bedrooms'] + df['Bathrooms']
 # Định nghĩa các đặc trưng (features)
 print("\n===== Bước 6: Định nghĩa đặc trưng cho mô hình =====")
 # Đặc trưng số học cơ bản (có thể đọc trực tiếp)
 numeric_cols = ['Area', 'Frontage', 'Access Road', 'Floors', 'Bedrooms', 'Bathrooms',
-                'Area_Bathrooms', 'Area_Floors', 'Frontage_AccessRoad', 
-                 'Log_Area', 'Area_per_room', 'Total_Rooms']
+                 'Area_Floors', 'Frontage_AccessRoad', 
+                 'Log_Area', 'Total_Rooms']
 print(f"Đặc trưng số học cơ bản: {numeric_cols}")
 categorical_cols = ['House direction', 'Balcony direction', 'Legal status', 'Furniture state']
 print(f"Đặc trưng phân loại: {categorical_cols}")
