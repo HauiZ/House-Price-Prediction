@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Định nghĩa mapping cho các giá trị categorical và tên cột
 HOUSE_DIRECTION_COLS = [
-    'House direction_null',
+    'House direction_null', 
     'House direction_Bắc', 
     'House direction_Nam',
     'House direction_Đông',
