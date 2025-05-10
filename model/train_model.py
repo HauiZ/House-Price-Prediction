@@ -1,226 +1,258 @@
+import os
 import pandas as pd
 import numpy as np
-import joblib
-from sklearn.linear_model import LinearRegression, Ridge, Lasso
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression, RidgeCV, LassoCV
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.impute import KNNImputer
+from sklearn.preprocessing import LabelEncoder
+import joblib
+import logging
 
-# Load dataset
-df = pd.read_csv('../vietnam_housing_dataset.csv', encoding='cp1252')
+# Cấu hình logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# Print initial info
-print("\nInitial data info:")
-print(df.info())
-print("\nSample data:")
-print(df.head())
-print("\nMissing values:")
-print(df.isnull().sum())
+# Định nghĩa đường dẫn
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(CURRENT_DIR)
+DATASET_PATH = os.path.join(PROJECT_DIR, 'vietnam_housing_dataset.csv')
+MODEL_PATH = os.path.join(CURRENT_DIR, 'house_price_model.joblib')
+SCALER_PATH = os.path.join(CURRENT_DIR, 'scaler.joblib')
+FEATURES_PATH = os.path.join(CURRENT_DIR, 'selected_features.joblib')
 
-# Remove outliers using IQR method
-def remove_outliers(df, column):
-    Q1 = df[column].quantile(0.25)
-    Q3 = df[column].quantile(0.75)
-    IQR = Q3 - Q1
-    lower_bound = Q1 - 1.5 * IQR
-    upper_bound = Q3 + 1.5 * IQR
-    return df[(df[column] >= lower_bound) & (df[column] <= upper_bound)]
 
-# Remove outliers for numeric columns
-numeric_columns = ['Price', 'Area', 'Frontage', 'Access Road']
-for col in numeric_columns:
-    df = remove_outliers(df, col)
+def prepare_data():
+    logger.info("=== BẮT ĐẦU CHUẨN BỊ DỮ LIỆU ===")
+    df = pd.read_csv(DATASET_PATH, encoding='cp1252')
 
-print("\nShape after removing outliers:", df.shape)
+    numeric_features = ['Area', 'Frontage', 'Access Road', 'Floors', 'Bedrooms', 'Bathrooms']
+    categorical_features = ['House direction', 'Balcony direction', 'Legal status', 'Furniture state']
 
-# Fill missing values using KNN Imputer for numeric columns
-numeric_cols_for_impute = ['Frontage', 'Access Road', 'Floors', 'Bedrooms', 'Bathrooms']
-knn_imputer = KNNImputer(n_neighbors=5)
-df[numeric_cols_for_impute] = knn_imputer.fit_transform(df[numeric_cols_for_impute])
+    # ====== Xử lý dữ liệu số ======
+    for col in numeric_features:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+        df[col] = df[col].fillna(df[col].median())
+        logger.info(f"[NUMERIC] {col} - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean():.2f}")
 
-# Fill categorical missing values
-df['House direction'] = df['House direction'].fillna('Không xác định')
-df['Balcony direction'] = df['Balcony direction'].fillna('Không xác định')
-df['Legal status'] = df['Legal status'].fillna('Khác')
-df['Furniture state'] = df['Furniture state'].fillna('Không nội thất')
+    # ====== Chuẩn hóa nhãn các cột phân loại ======
+    legal_status_mapping = {
+        'Sổ đỏ': 'Have certificate',
+        'Sổ hồng': 'Have certificate',
+        'Giấy tờ hợp lệ': 'Have certificate',
+        'Đang chờ sổ': 'Sale contract',
+        'Khác': 'Sale contract'
+    }
+    df['Legal status'] = df['Legal status'].map(legal_status_mapping).fillna('unknown')
 
-# Add interaction features
-df['Area_Bathrooms'] = df['Area'] * df['Bathrooms']
-df['Area_Floors'] = df['Area'] * df['Floors']
-df['Frontage_AccessRoad'] = df['Frontage'] * df['Access Road']
+    furniture_mapping = {
+        'Không nội thất': 'none',
+        'Nội thất cơ bản': 'basic',
+        'Đầy đủ nội thất': 'full',
+        'Cao cấp': 'full'
+    }
+    df['Furniture state'] = df['Furniture state'].map(furniture_mapping).fillna('unknown')
 
-# Add non-linear features
-df['Area_Squared'] = df['Area'] ** 2
-df['Log_Area'] = np.log1p(df['Area'])
-df['Log_Price'] = np.log1p(df['Price'])
+    # ====== Điền 'unknown' cho các giá trị phân loại còn thiếu ======
+    for col in categorical_features:
+        df[col] = df[col].fillna('unknown')
+        logger.info(f"[CATEGORICAL] {col} unique values: {df[col].unique()}")
 
-# Add derived features
-df['Area_per_room'] = df['Area'] / (df['Bedrooms'] + df['Bathrooms'])
-df['Rooms_per_floor'] = (df['Bedrooms'] + df['Bathrooms']) / df['Floors']
-df['Total_Rooms'] = df['Bedrooms'] + df['Bathrooms']
+    # ====== Label Encoding cho dữ liệu phân loại ======
+    label_encoders = {}
+    for col in categorical_features:
+        le = LabelEncoder()
+        df[col] = le.fit_transform(df[col])
+        label_encoders[col] = le
 
-# Print info after feature engineering
-print("\nAfter feature engineering:")
-print(df.info())
-print("\nValue counts for categorical columns:")
-for col in ['House direction', 'Balcony direction', 'Legal status', 'Furniture state']:
-    print(f"\n{col}:")
-    print(df[col].value_counts())
+    # ====== Feature Engineering ======
+    df['Area_per_floor'] = df['Area'] / df['Floors'].clip(lower=1)
+    df['Area_per_room'] = df['Area'] / (df['Bedrooms'] + df['Bathrooms']).clip(lower=1)
+    df['Frontage_ratio'] = df['Frontage'] / np.sqrt(df['Area'].clip(lower=1))
 
-# Handle categorical variables properly for Vietnamese housing data
-numeric_cols = ['Area', 'Frontage', 'Access Road', 'Floors', 'Bedrooms', 'Bathrooms',
-                'Area_Bathrooms', 'Area_Floors', 'Frontage_AccessRoad', 
-                'Area_Squared', 'Log_Area', 'Area_per_room', 'Rooms_per_floor', 'Total_Rooms']
-categorical_cols = ['House direction', 'Balcony direction', 'Legal status', 'Furniture state']
+    features = numeric_features + categorical_features + ['Area_per_floor', 'Area_per_room', 'Frontage_ratio']
+    X = df[features]
+    y = df['Price']
 
-# Define features and target
-X = df[numeric_cols + categorical_cols].copy()
-y = df['Log_Price'].values  # Use log-transformed price as target
+    return X, y, features, df
 
-# Print feature statistics
-print("\nFeature statistics:")
-print(X.describe())
 
-# Create preprocessing pipeline with feature scaling
-preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', StandardScaler(), numeric_cols),
-        ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_cols)
-    ])
-
-# Define improved models
-models = {
-    'Linear Regression': LinearRegression(),
-    'Ridge Regression': Ridge(alpha=1.0),
-    'Lasso Regression': Lasso(alpha=0.001),  # Reduced alpha for less regularization
-    'Random Forest': RandomForestRegressor(
-        n_estimators=200,
-        max_depth=10,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=42
-    ),
-    'Gradient Boosting': GradientBoostingRegressor(
-        n_estimators=500,
-        learning_rate=0.01,
-        max_depth=7,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=42
-    )
-}
-
-# Split data
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# Train and evaluate each model
-results = {}
-best_model = None
-best_score = float('-inf')
-
-print("\n=== Model Comparison ===")
-for name, model in models.items():
-    print(f"\nTraining {name}...")
+def print_cost_functions():
+    """In các phương trình chi phí (cost function) cho các mô hình hồi quy"""
+    logger.info("\n=== PHƯƠNG TRÌNH CHI PHÍ CỦA CÁC MÔ HÌNH ===")
     
-    # Create pipeline
-    pipeline = Pipeline([
-        ('preprocessor', preprocessor),
-        ('regressor', model)
-    ])
+    cost_linear = r"J(θ) = (1/2m) * Σ(h_θ(x^(i)) - y^(i))^2"
+    cost_ridge = r"J(θ) = (1/2m) * Σ(h_θ(x^(i)) - y^(i))^2 + α * Σ(θ_j^2)"
+    cost_lasso = r"J(θ) = (1/2m) * Σ(h_θ(x^(i)) - y^(i))^2 + α * Σ|θ_j|"
     
-    # Train model
-    pipeline.fit(X_train, y_train)
+    logger.info(f"Linear Regression - Cost Function: {cost_linear}")
+    logger.info(f"Ridge Regression - Cost Function: {cost_ridge}")
+    logger.info(f"Lasso Regression - Cost Function: {cost_lasso}")
     
-    # Make predictions (in log space)
-    train_pred = pipeline.predict(X_train)
-    test_pred = pipeline.predict(X_test)
+    logger.info("Trong đó:")
+    logger.info("  - m: số lượng mẫu")
+    logger.info("  - h_θ(x^(i)): giá trị dự đoán cho mẫu thứ i")
+    logger.info("  - y^(i): giá trị thực tế cho mẫu thứ i")
+    logger.info("  - θ: tham số mô hình")
+    logger.info("  - α: hệ số điều chỉnh (regularization)")
+
+
+def train_model(X, y, features):
+    logger.info("\n=== HUẤN LUYỆN VÀ ĐÁNH GIÁ MÔ HÌNH ===")
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
     
-    # Convert predictions back to original scale
-    train_pred_original = np.expm1(train_pred)
-    test_pred_original = np.expm1(test_pred)
-    y_train_original = np.expm1(y_train)
-    y_test_original = np.expm1(y_test)
+    # Train Linear Regression model
+    linear = LinearRegression().fit(X_train_scaled, y_train)
     
-    # Calculate metrics in original scale
-    train_r2 = r2_score(y_train_original, train_pred_original)
-    test_r2 = r2_score(y_test_original, test_pred_original)
-    test_rmse = np.sqrt(mean_squared_error(y_test_original, test_pred_original))
+    # Train Ridge model
+    ridge = RidgeCV(alphas=np.logspace(-3, 2, 50), cv=5).fit(X_train_scaled, y_train)
+    logger.info(f"Ridge alpha selected: {ridge.alpha_:.6f}")
     
-    # Cross-validation
-    cv_scores = cross_val_score(pipeline, X, y, cv=5, scoring='r2')
+    # Train Lasso model
+    lasso = LassoCV(alphas=np.logspace(-3, 2, 50), cv=5, max_iter=10000).fit(X_train_scaled, y_train)
+    logger.info(f"Lasso alpha selected: {lasso.alpha_:.6f}")
     
-    results[name] = {
-        'train_r2': train_r2,
-        'test_r2': test_r2,
-        'test_rmse': test_rmse,
-        'cv_mean': cv_scores.mean(),
-        'cv_std': cv_scores.std(),
-        'pipeline': pipeline
+    # Evaluate models
+    models = {
+        'Linear': linear,
+        'Ridge': ridge,
+        'Lasso': lasso
     }
     
-    print(f"{name} Results:")
-    print(f"Training R²: {train_r2:.4f}")
-    print(f"Test R²: {test_r2:.4f}")
-    print(f"Test RMSE: {test_rmse:.4f}")
-    print(f"Cross-validation R² (mean ± std): {cv_scores.mean():.4f} ± {cv_scores.std():.4f}")
+    logger.info("\n=== KẾT QUẢ ĐÁNH GIÁ CÁC MÔ HÌNH ===")
     
-    # Print feature importance for tree-based models
-    if hasattr(pipeline['regressor'], 'feature_importances_'):
-        print("\nFeature Importance:")
-        feature_names = (numeric_cols + 
-                        [f"{col}_{val}" for col, vals in 
-                         zip(categorical_cols, pipeline['preprocessor']
-                             .named_transformers_['cat'].categories_) 
-                         for val in vals])
-        importances = pipeline['regressor'].feature_importances_
-        importance_dict = dict(zip(feature_names, importances))
-        sorted_importance = sorted(importance_dict.items(), key=lambda x: x[1], reverse=True)
-        for name, imp in sorted_importance[:10]:  # Show top 10 features
-            print(f"{name}: {imp:.4f} ({imp*100:.2f}%)")
+    for name, model in models.items():
+        train_r2 = cross_val_score(model, X_train_scaled, y_train, cv=5, scoring='r2').mean()
+        test_pred = model.predict(X_test_scaled)
+        test_r2 = r2_score(y_test, test_pred)
+        test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
+        
+        logger.info(f"{name} - R² Score (train): {train_r2:.4f}")
+        logger.info(f"{name} - R² Score (test): {test_r2:.4f}")
+        logger.info(f"{name} - RMSE (test): {test_rmse:.2f} tỷ đồng")
     
-    # Print coefficients for linear models
-    if hasattr(pipeline['regressor'], 'coef_'):
-        print("\nTop 10 Feature Coefficients (Absolute Value):")
-        feature_names = (numeric_cols + 
-                        [f"{col}_{val}" for col, vals in 
-                         zip(categorical_cols, pipeline['preprocessor']
-                             .named_transformers_['cat'].categories_) 
-                         for val in vals])
-        coefficients = pipeline['regressor'].coef_
-        coef_dict = dict(zip(feature_names, coefficients))
-        sorted_coef = sorted(coef_dict.items(), key=lambda x: abs(x[1]), reverse=True)
-        for name, coef in sorted_coef[:10]:
-            print(f"{name}: {coef:.4f}")
+    # Select best model
+    best_model_name = max(models.keys(), key=lambda name: r2_score(y_test, models[name].predict(X_test_scaled)))
+    best_model = models[best_model_name]
+    logger.info(f"\nBest model selected: {best_model_name}")
     
-    # Update best model
-    if test_r2 > best_score:
-        best_score = test_r2
-        best_model = pipeline
+    y_pred = best_model.predict(X_test_scaled)
+    
+    # Print cost functions
+    print_cost_functions()
+    
+    # Analyze coefficients and print regression equation
+    analyze_coefficients(best_model, features, X_train, y_train, best_model_name)
+    plot_predictions(y_test, y_pred)
 
-print("\n=== Best Model ===")
-best_name = [name for name, res in results.items() 
-            if res['pipeline'] is best_model][0]
-print(f"Best model: {best_name}")
-print(f"Test R²: {best_score:.4f}")
+    joblib.dump(best_model, MODEL_PATH)
+    joblib.dump(scaler, SCALER_PATH)
+    joblib.dump(features, FEATURES_PATH)
+    logger.info("Đã lưu mô hình và thông tin thành công")
+    return best_model, scaler
 
-# Save best model
-joblib.dump(best_model, 'house_price_model.pkl')
 
-# Save feature information
-feature_info = {
-    'numeric_cols': numeric_cols,
-    'categorical_cols': categorical_cols,
-    'categorical_values': {
-        'House direction': ["Không xác định", "Bắc", "Nam", "Đông", "Tây", "Đông Bắc", "Tây Bắc", "Đông Nam", "Tây Nam"],
-        'Balcony direction': ["Không xác định", "Bắc", "Nam", "Đông", "Tây", "Đông Bắc", "Tây Bắc", "Đông Nam", "Tây Nam"],
-        'Legal status': ["Sổ đỏ", "Sổ hồng", "Giấy tờ hợp lệ", "Đang chờ sổ", "Khác"],
-        'Furniture state': ["Không nội thất", "Nội thất cơ bản", "Đầy đủ nội thất", "Cao cấp"]
-    }
-}
-joblib.dump(feature_info, 'feature_info.pkl')
+def analyze_coefficients(model, features, X, y, model_name):
+    """Phân tích hệ số hồi quy và hiển thị phương trình"""
+    logger.info("\n=== PHÂN TÍCH HỆ SỐ HỒI QUY ===")
+    
+    if hasattr(model, 'coef_') and len(model.coef_) == len(features):
+        try:
+            # Tạo DataFrame chứa thông tin về các hệ số
+            importance = pd.DataFrame({
+                'Feature': features,
+                'Coefficient': model.coef_,
+                'Abs_Coefficient': abs(model.coef_)
+            }).sort_values('Abs_Coefficient', ascending=False)
+            
+            # Hiển thị phương trình hồi quy
+            logger.info(f"\nPhương trình hồi quy tuyến tính ({model_name}):")
+            
+            # Chỉ lấy những hệ số có giá trị tuyệt đối lớn hơn ngưỡng
+            significant_coefs = [(f"({coef:.4f})×{feat}", coef) for feat, coef in zip(features, model.coef_) if abs(coef) > 1e-4]
+            equation_terms = [term for term, _ in significant_coefs]
+            
+            if hasattr(model, 'intercept_'):
+                intercept = model.intercept_
+                equation = "Price = " + " + ".join(equation_terms) + f" + {intercept:.4f}"
+            else:
+                equation = "Price = " + " + ".join(equation_terms)
+                
+            logger.info(equation)
+            
+            # Hiển thị top 10 features ảnh hưởng lớn nhất
+            logger.info("\nTop 10 features ảnh hưởng lớn nhất:")
+            for idx, row in importance.head(10).iterrows():
+                logger.info(f"{row['Feature']}: {row['Coefficient']:+.4f}")
+            
+            # Vẽ biểu đồ
+            plt.figure(figsize=(10, 6))
+            sns.barplot(x='Abs_Coefficient', y='Feature', data=importance.head(10))
+            plt.title(f"Top 10 Features Ảnh Hưởng Tới Giá Nhà ({model_name})")
+            plt.tight_layout()
+            plt.savefig(os.path.join(CURRENT_DIR, f'top_10_features_{model_name.lower()}.png'))
+            
+        except Exception as e:
+            logger.error(f"Error analyzing coefficients: {str(e)}")
+    else:
+        logger.warning("Model does not have coefficients in the expected format")
 
-print("\nModel and feature information saved successfully.")
+
+def plot_predictions(y_true, y_pred):
+    plt.figure(figsize=(8, 6))
+    plt.scatter(y_true, y_pred, alpha=0.5)
+    plt.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--')
+    plt.xlabel('Giá thực tế (tỷ đồng)')
+    plt.ylabel('Giá dự đoán (tỷ đồng)')
+    plt.title('So sánh giá thực tế và dự đoán')
+    plt.tight_layout()
+    plt.savefig(os.path.join(CURRENT_DIR, 'prediction_vs_actual.png'))
+    
+    # Plot residuals
+    residuals = y_true - y_pred
+    plt.figure(figsize=(8, 6))
+    plt.scatter(y_pred, residuals, alpha=0.5)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.xlabel('Giá dự đoán (tỷ đồng)')
+    plt.ylabel('Residuals (tỷ đồng)')
+    plt.title('Biểu đồ Residuals')
+    plt.tight_layout()
+    plt.savefig(os.path.join(CURRENT_DIR, 'residuals.png'))
+
+
+def main():
+    X, y, features, df = prepare_data()
+    
+    # Tạo DataFrame mới bao gồm cả features và target
+    data_with_price = X.copy()
+    data_with_price['Price'] = y
+    
+    # Tính ma trận tương quan
+    correlation_matrix = data_with_price.corr()
+    
+    logger.info("\nTop 10 features có tương quan mạnh nhất với giá:")
+    # Sort và lấy top 10 features có tương quan mạnh nhất với Price
+    correlations_with_price = correlation_matrix['Price'].abs()
+    correlations_with_price = correlations_with_price[correlations_with_price.index != 'Price']
+    logger.info(correlations_with_price.sort_values(ascending=False).head(10))
+    
+    # Vẽ heatmap tương quan
+    plt.figure(figsize=(12, 10))
+    mask = np.triu(correlation_matrix)
+    sns.heatmap(correlation_matrix, mask=mask, annot=False, cmap='coolwarm', 
+                linewidths=0.5, center=0)
+    plt.title('Correlation Matrix')
+    plt.tight_layout()
+    plt.savefig(os.path.join(CURRENT_DIR, 'correlation_matrix.png'))
+    
+    train_model(X, y, features)
+
+
+if __name__ == '__main__':
+    main()

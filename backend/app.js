@@ -52,22 +52,45 @@ app.post('/api/predict', (req, res) => {
             modelInputs.push((features.balconyDirection || features.houseDirection) === dir ? 1 : 0);
         });
         
-        // Legal status
-        const legalStatuses = ["Sổ đỏ", "Sổ hồng", "Giấy tờ hợp lệ", "Đang chờ sổ", "Khác"];
-        legalStatuses.forEach(status => {
-            modelInputs.push(features.legalStatus === status ? 1 : 0);
+        // FIXED: Legal status - updated to match Python model's expected categories (3 values)
+        // Map from frontend values to Python model's expected categories
+        const legalStatusMap = {
+            "Sổ đỏ": "Have certificate",
+            "Sổ hồng": "Have certificate",
+            "Giấy tờ hợp lệ": "Have certificate",
+            "Đang chờ sổ": "Sale contract",
+            "Khác": "null"
+        };
+        
+        // 3 categories expected by Python: null, Have certificate, Sale contract
+        const pythonLegalStatuses = ["null", "Have certificate", "Sale contract"];
+        pythonLegalStatuses.forEach(status => {
+            // Map the frontend value to the Python expected value
+            const mappedStatus = legalStatusMap[features.legalStatus] || "null";
+            modelInputs.push(mappedStatus === status ? 1 : 0);
         });
         
-        // Furniture state
-        const furnitureStates = ["Không nội thất", "Nội thất cơ bản", "Đầy đủ nội thất", "Cao cấp"];
-        furnitureStates.forEach(state => {
-            modelInputs.push(features.furnitureState === state ? 1 : 0);
+        // FIXED: Furniture state - updated to match Python model's expected categories (3 values)
+        // Map from frontend values to Python model's expected categories
+        const furnitureStateMap = {
+            "Không nội thất": "null",
+            "Nội thất cơ bản": "basic",
+            "Đầy đủ nội thất": "full",
+            "Cao cấp": "full"
+        };
+        
+        // 3 categories expected by Python: null, basic, full
+        const pythonFurnitureStates = ["null", "basic", "full"];
+        pythonFurnitureStates.forEach(state => {
+            // Map the frontend value to the Python expected value
+            const mappedState = furnitureStateMap[features.furnitureState] || "null";
+            modelInputs.push(mappedState === state ? 1 : 0);
         });
         
         console.log('Sending to model:', modelInputs);
         
         // Verify the number of features
-        const expectedFeatures = 6 + directions.length * 2 + legalStatuses.length + furnitureStates.length;
+        const expectedFeatures = 6 + directions.length * 2 + pythonLegalStatuses.length + pythonFurnitureStates.length;
         if (modelInputs.length !== expectedFeatures) {
             throw new Error(`Invalid number of features. Expected ${expectedFeatures}, got ${modelInputs.length}`);
         }
@@ -131,39 +154,6 @@ app.post('/api/predict', (req, res) => {
 // Simple healthcheck endpoint
 app.get('/api/health', (req, res) => {
     res.json({ status: 'OK' });
-});
-
-// Add additional endpoint for fetching location metadata
-app.get('/api/locations', (req, res) => {
-    // This would typically come from a database
-    // Here we're just providing some sample data for HCMC districts
-    const locations = [
-        { name: "Quận 1", priceMultiplier: 1.5 },
-        { name: "Quận 2", priceMultiplier: 1.3 },
-        { name: "Quận 3", priceMultiplier: 1.4 },
-        { name: "Quận 4", priceMultiplier: 1.2 },
-        { name: "Quận 5", priceMultiplier: 1.25 },
-        { name: "Quận 6", priceMultiplier: 1.1 },
-        { name: "Quận 7", priceMultiplier: 1.35 },
-        { name: "Quận 8", priceMultiplier: 1.0 },
-        { name: "Quận 9", priceMultiplier: 1.15 },
-        { name: "Quận 10", priceMultiplier: 1.3 },
-        { name: "Quận 11", priceMultiplier: 1.2 },
-        { name: "Quận 12", priceMultiplier: 1.0 },
-        { name: "Quận Bình Thạnh", priceMultiplier: 1.3 },
-        { name: "Quận Tân Bình", priceMultiplier: 1.2 },
-        { name: "Quận Tân Phú", priceMultiplier: 1.1 },
-        { name: "Quận Phú Nhuận", priceMultiplier: 1.35 },
-        { name: "Quận Gò Vấp", priceMultiplier: 1.15 },
-        { name: "Quận Bình Tân", priceMultiplier: 1.05 },
-        { name: "Huyện Củ Chi", priceMultiplier: 0.8 },
-        { name: "Huyện Hóc Môn", priceMultiplier: 0.85 },
-        { name: "Huyện Bình Chánh", priceMultiplier: 0.9 },
-        { name: "Huyện Nhà Bè", priceMultiplier: 0.95 },
-        { name: "Huyện Cần Giờ", priceMultiplier: 0.75 }
-    ];
-    
-    res.json(locations);
 });
 
 // Serve static files from the client build directory in production
