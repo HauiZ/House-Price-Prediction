@@ -20,7 +20,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Define the API URL - adjust this based on your environment
   const API_URL = 'http://localhost:5000';
 
   const handleChange = (field, value) => {
@@ -29,8 +28,7 @@ export default function App() {
     setPrice(null);
     setPriceInBillions(null);
   };
-
-  // Validate inputs before proceeding
+  // check validation
   const validateInputs = () => {
     if (!features.area || isNaN(parseFloat(features.area)) || parseFloat(features.area) <= 0) {
       setError('Vui lòng nhập diện tích hợp lệ');
@@ -72,7 +70,6 @@ export default function App() {
     return true;
   };
 
-  // Handle prediction API call
   const handlePredict = async () => {
     if (!validateInputs()) {
       return;
@@ -82,13 +79,12 @@ export default function App() {
     setError(null);
 
     try {
-      // Prepare data for the API call
       const requestData = {
         area: features.area,
         frontage: features.frontage,
         accessRoad: features.accessRoad,
         houseDirection: features.houseDirection,
-        balconyDirection: features.balconyDirection || features.houseDirection, // Set balcony direction to house direction if not provided
+        balconyDirection: features.balconyDirection || features.houseDirection, 
         floors: features.floors,
         bedrooms: features.bedrooms,
         bathrooms: features.bathrooms,
@@ -96,7 +92,6 @@ export default function App() {
         furnitureState: features.furnitureState
       };
 
-      // Call the API
       const response = await fetch(`${API_URL}/api/predict`, {
         method: 'POST',
         headers: {
@@ -106,14 +101,12 @@ export default function App() {
       });
 
       if (!response.ok) {
-        // Try to get error details from response
         const errorData = await response.json();
         throw new Error(errorData.error || 'API request failed');
       }
 
       const data = await response.json();
       
-      // Update UI with prediction results
       setPrice(data.prediction);
       setPriceInBillions(data.predictionInBillions);
       
@@ -147,7 +140,7 @@ export default function App() {
     return new Intl.NumberFormat('vi-VN').format(price);
   };
 
-  const directionOptions = ["Bắc", "Nam", "Đông", "Tây", "Đông Bắc", "Tây Bắc", "Đông Nam", "Tây Nam"];
+  const directionOptions = ["Bắc", "Nam", "Đông", "Tây", "Đông - Bắc", "Tây - Bắc", "Đông - Nam", "Tây - Nam"];
   const legalStatusOptions = ["Sổ đỏ", "Sổ hồng", "Giấy tờ hợp lệ", "Đang chờ sổ", "Khác"];
   const furnitureStateOptions = ["Không nội thất", "Nội thất cơ bản", "Đầy đủ nội thất", "Cao cấp"];
 

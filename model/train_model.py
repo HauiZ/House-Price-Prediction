@@ -4,18 +4,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.linear_model import LinearRegression, RidgeCV, LassoCV
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import LabelEncoder
 import joblib
 import logging
 
-# Cấu hình logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Định nghĩa đường dẫn
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(CURRENT_DIR)
 DATASET_PATH = os.path.join(PROJECT_DIR, 'vietnam_housing_dataset.csv')
@@ -27,17 +25,17 @@ FEATURES_PATH = os.path.join(CURRENT_DIR, 'selected_features.joblib')
 def prepare_data():
     logger.info("=== BẮT ĐẦU CHUẨN BỊ DỮ LIỆU ===")
     df = pd.read_csv(DATASET_PATH, encoding='cp1252')
+    # Bỏ các cột không cần thiết
+    df.drop(columns=['Address'], errors='ignore', inplace=True)
 
     numeric_features = ['Area', 'Frontage', 'Access Road', 'Floors', 'Bedrooms', 'Bathrooms']
     categorical_features = ['House direction', 'Balcony direction', 'Legal status', 'Furniture state']
 
-    # ====== Xử lý dữ liệu số ======
     for col in numeric_features:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-        df[col] = df[col].fillna(df[col].median())
+        df[col] = df[col].fillna(df[col].mean())
         logger.info(f"[NUMERIC] {col} - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean():.2f}")
 
-    # ====== Chuẩn hóa nhãn các cột phân loại ======
     legal_status_mapping = {
         'Sổ đỏ': 'Have certificate',
         'Sổ hồng': 'Have certificate',
@@ -45,7 +43,7 @@ def prepare_data():
         'Đang chờ sổ': 'Sale contract',
         'Khác': 'Sale contract'
     }
-    df['Legal status'] = df['Legal status'].map(legal_status_mapping).fillna('unknown')
+    df['Legal status'] = df['Legal status'].map(legal_status_mapping).fillna('null')
 
     furniture_mapping = {
         'Không nội thất': 'none',
@@ -53,50 +51,27 @@ def prepare_data():
         'Đầy đủ nội thất': 'full',
         'Cao cấp': 'full'
     }
-    df['Furniture state'] = df['Furniture state'].map(furniture_mapping).fillna('unknown')
-
-    # ====== Điền 'unknown' cho các giá trị phân loại còn thiếu ======
+    df['Furniture state'] = df['Furniture state'].map(furniture_mapping).fillna('null')
+    # Điền giá trị thiếu cho các cột phân loại
     for col in categorical_features:
-        df[col] = df[col].fillna('unknown')
+        df[col] = df[col].fillna('null')
         logger.info(f"[CATEGORICAL] {col} unique values: {df[col].unique()}")
 
-    # ====== Label Encoding cho dữ liệu phân loại ======
-    label_encoders = {}
-    for col in categorical_features:
-        le = LabelEncoder()
-        df[col] = le.fit_transform(df[col])
-        label_encoders[col] = le
-
-    # ====== Feature Engineering ======
+    # One-Hot Encoding
+    df = pd.get_dummies(df, columns=categorical_features, drop_first=False)
+    print("Số cột sau one-hot encoding:", len(df.columns))
+    # Feature Engineering
     df['Area_per_floor'] = df['Area'] / df['Floors'].clip(lower=1)
     df['Area_per_room'] = df['Area'] / (df['Bedrooms'] + df['Bathrooms']).clip(lower=1)
     df['Frontage_ratio'] = df['Frontage'] / np.sqrt(df['Area'].clip(lower=1))
+    df['Area_squared'] = df['Area'] ** 2
+    df['Area_log'] = np.log1p(df['Area'])
 
-    features = numeric_features + categorical_features + ['Area_per_floor', 'Area_per_room', 'Frontage_ratio']
+    features = [col for col in df.columns if col != 'Price']
     X = df[features]
     y = df['Price']
 
     return X, y, features, df
-
-
-def print_cost_functions():
-    """In các phương trình chi phí (cost function) cho các mô hình hồi quy"""
-    logger.info("\n=== PHƯƠNG TRÌNH CHI PHÍ CỦA CÁC MÔ HÌNH ===")
-    
-    cost_linear = r"J(θ) = (1/2m) * Σ(h_θ(x^(i)) - y^(i))^2"
-    cost_ridge = r"J(θ) = (1/2m) * Σ(h_θ(x^(i)) - y^(i))^2 + α * Σ(θ_j^2)"
-    cost_lasso = r"J(θ) = (1/2m) * Σ(h_θ(x^(i)) - y^(i))^2 + α * Σ|θ_j|"
-    
-    logger.info(f"Linear Regression - Cost Function: {cost_linear}")
-    logger.info(f"Ridge Regression - Cost Function: {cost_ridge}")
-    logger.info(f"Lasso Regression - Cost Function: {cost_lasso}")
-    
-    logger.info("Trong đó:")
-    logger.info("  - m: số lượng mẫu")
-    logger.info("  - h_θ(x^(i)): giá trị dự đoán cho mẫu thứ i")
-    logger.info("  - y^(i): giá trị thực tế cho mẫu thứ i")
-    logger.info("  - θ: tham số mô hình")
-    logger.info("  - α: hệ số điều chỉnh (regularization)")
 
 
 def train_model(X, y, features):
@@ -106,19 +81,15 @@ def train_model(X, y, features):
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
-    
-    # Train Linear Regression model
+    #Linear regression
     linear = LinearRegression().fit(X_train_scaled, y_train)
-    
-    # Train Ridge model
+    #Ridge regression
     ridge = RidgeCV(alphas=np.logspace(-3, 2, 50), cv=5).fit(X_train_scaled, y_train)
     logger.info(f"Ridge alpha selected: {ridge.alpha_:.6f}")
-    
-    # Train Lasso model
+    #Lasso regression
     lasso = LassoCV(alphas=np.logspace(-3, 2, 50), cv=5, max_iter=10000).fit(X_train_scaled, y_train)
     logger.info(f"Lasso alpha selected: {lasso.alpha_:.6f}")
     
-    # Evaluate models
     models = {
         'Linear': linear,
         'Ridge': ridge,
@@ -135,19 +106,15 @@ def train_model(X, y, features):
         
         logger.info(f"{name} - R² Score (train): {train_r2:.4f}")
         logger.info(f"{name} - R² Score (test): {test_r2:.4f}")
-        logger.info(f"{name} - RMSE (test): {test_rmse:.2f} tỷ đồng")
+        logger.info(f"{name} - RMSE (test): {test_rmse:.2f} ")
     
-    # Select best model
+    # chọn model tốt nhất dựa trên R² Score
     best_model_name = max(models.keys(), key=lambda name: r2_score(y_test, models[name].predict(X_test_scaled)))
     best_model = models[best_model_name]
     logger.info(f"\nBest model selected: {best_model_name}")
     
     y_pred = best_model.predict(X_test_scaled)
     
-    # Print cost functions
-    print_cost_functions()
-    
-    # Analyze coefficients and print regression equation
     analyze_coefficients(best_model, features, X_train, y_train, best_model_name)
     plot_predictions(y_test, y_pred)
 
@@ -164,17 +131,14 @@ def analyze_coefficients(model, features, X, y, model_name):
     
     if hasattr(model, 'coef_') and len(model.coef_) == len(features):
         try:
-            # Tạo DataFrame chứa thông tin về các hệ số
             importance = pd.DataFrame({
                 'Feature': features,
                 'Coefficient': model.coef_,
                 'Abs_Coefficient': abs(model.coef_)
             }).sort_values('Abs_Coefficient', ascending=False)
             
-            # Hiển thị phương trình hồi quy
             logger.info(f"\nPhương trình hồi quy tuyến tính ({model_name}):")
             
-            # Chỉ lấy những hệ số có giá trị tuyệt đối lớn hơn ngưỡng
             significant_coefs = [(f"({coef:.4f})×{feat}", coef) for feat, coef in zip(features, model.coef_) if abs(coef) > 1e-4]
             equation_terms = [term for term, _ in significant_coefs]
             
@@ -186,7 +150,6 @@ def analyze_coefficients(model, features, X, y, model_name):
                 
             logger.info(equation)
             
-            # Hiển thị top 10 features ảnh hưởng lớn nhất
             logger.info("\nTop 10 features ảnh hưởng lớn nhất:")
             for idx, row in importance.head(10).iterrows():
                 logger.info(f"{row['Feature']}: {row['Coefficient']:+.4f}")
@@ -214,7 +177,6 @@ def plot_predictions(y_true, y_pred):
     plt.tight_layout()
     plt.savefig(os.path.join(CURRENT_DIR, 'prediction_vs_actual.png'))
     
-    # Plot residuals
     residuals = y_true - y_pred
     plt.figure(figsize=(8, 6))
     plt.scatter(y_pred, residuals, alpha=0.5)
@@ -229,27 +191,15 @@ def plot_predictions(y_true, y_pred):
 def main():
     X, y, features, df = prepare_data()
     
-    # Tạo DataFrame mới bao gồm cả features và target
     data_with_price = X.copy()
     data_with_price['Price'] = y
     
-    # Tính ma trận tương quan
     correlation_matrix = data_with_price.corr()
     
     logger.info("\nTop 10 features có tương quan mạnh nhất với giá:")
-    # Sort và lấy top 10 features có tương quan mạnh nhất với Price
     correlations_with_price = correlation_matrix['Price'].abs()
     correlations_with_price = correlations_with_price[correlations_with_price.index != 'Price']
     logger.info(correlations_with_price.sort_values(ascending=False).head(10))
-    
-    # Vẽ heatmap tương quan
-    plt.figure(figsize=(12, 10))
-    mask = np.triu(correlation_matrix)
-    sns.heatmap(correlation_matrix, mask=mask, annot=False, cmap='coolwarm', 
-                linewidths=0.5, center=0)
-    plt.title('Correlation Matrix')
-    plt.tight_layout()
-    plt.savefig(os.path.join(CURRENT_DIR, 'correlation_matrix.png'))
     
     train_model(X, y, features)
 
