@@ -40,7 +40,6 @@ for col in numeric_columns:
     print(f"Xử lý outliers cho cột {col}: {original_rows - df.shape[0]} dòng bị loại bỏ")
     original_rows = df.shape[0]
 
-# Xử lý missing values cho cột categorical
 print("\n===== Bước 4: Xử lý giá trị thiếu =====")
 df['House direction'] = df['House direction'].fillna('Không xác định')
 df['Balcony direction'] = df['Balcony direction'].fillna('Không xác định')
@@ -57,12 +56,9 @@ for col in numeric_cols_with_missing:
         df[col] = df[col].fillna(median_value)
         print(f"Điền giá trị thiếu cho cột {col} bằng giá trị ở giữa: {median_value:.2f}")
 
-# Tạo biến phụ thuộc - Sử dụng log transform để chuẩn hóa phân phối
 print("\n===== Bước 5: Tạo biến phụ thuộc (Y) =====") 
-df['Log_Price'] = np.log1p(df['Price'])  # log(1+x) để tránh lỗi khi giá trị = 0
 print(f"Đã chuyển đổi biến Price sang Log_Price để giảm độ lệch")
-
-# Add derived features
+#add feature
 df['Area_Bathrooms'] = df['Area'] * df['Bathrooms']
 df['Area_Floors'] = df['Area'] * df['Floors']
 df['Frontage_AccessRoad'] = df['Frontage'] * df['Access Road']
@@ -74,7 +70,6 @@ df['Log_Price'] = np.log1p(df['Price'])
 
 # Định nghĩa các đặc trưng (features)
 print("\n===== Bước 6: Định nghĩa đặc trưng cho mô hình =====")
-# Đặc trưng số học cơ bản (có thể đọc trực tiếp)
 numeric_cols = ['Area', 'Frontage', 'Access Road', 'Floors', 'Bedrooms', 'Bathrooms',
                 'Area_Bathrooms', 'Area_Floors', 'Frontage_AccessRoad', 
                  'Log_Area', 'Total_Rooms']
@@ -84,8 +79,8 @@ print(f"Đặc trưng phân loại: {categorical_cols}")
 
 # Chuẩn bị dữ liệu cho mô hình
 X = df[numeric_cols + categorical_cols].copy()
-y = df['Log_Price'].values  # Sử dụng giá đã chuyển đổi log
-# Chia dữ liệu thành tập huấn luyện và tập kiểm tra
+y = df['Log_Price'].values
+
 print("\n===== Bước 7: Chia dữ liệu train/test =====")
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 print(f"Tập huấn luyện: {X_train.shape[0]} mẫu")
@@ -95,7 +90,6 @@ print(f"Tập kiểm tra: {X_test.shape[0]} mẫu")
 print("\n===== Bước 8: Tạo pipeline tiền xử lý =====")
 preprocessor = ColumnTransformer(
     transformers=[
-        # Giữ nguyên các cột số, không chuẩn hóa để dễ hiểu
         ('num', 'passthrough', numeric_cols),
         # Mã hóa one-hot cho các đặc trưng phân loại
         ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_cols)
@@ -104,11 +98,11 @@ preprocessor = ColumnTransformer(
 # Tạo và huấn luyện mô hình Random Forest
 print("\n===== Bước 9: Tạo và huấn luyện mô hình Random Forest =====")
 random_forest = RandomForestRegressor(
-    n_estimators=300,       # Số lượng cây trong rừng (cân bằng giữa hiệu suất và tốc độ)
+    n_estimators=300,       # Số lượng cây trong rừng 
     max_depth=None,         # Để None cho phép cây phát triển đầy đủ
     min_samples_split=2,    # Số mẫu tối thiểu cần thiết để phân tách một nút
     min_samples_leaf=1,     # Số mẫu tối thiểu để tạo thành một lá
-    random_state=42         # Đảm bảo kết quả có thể tái tạo lại
+    random_state=42
 )
 
 # Tạo pipeline hoàn chỉnh
