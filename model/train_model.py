@@ -23,7 +23,7 @@ FEATURES_PATH = os.path.join(CURRENT_DIR, 'selected_features.joblib')
 
 
 def prepare_data():
-    logger.info("=== BẮT ĐẦU CHUẨN BỊ DỮ LIỆU ===")
+    print("=== BẮT ĐẦU CHUẨN BỊ DỮ LIỆU ===")
     df = pd.read_csv(DATASET_PATH, encoding='cp1252')
     # Bỏ các cột không cần thiết
     df.drop(columns=['Address'], errors='ignore', inplace=True)
@@ -34,7 +34,7 @@ def prepare_data():
     for col in numeric_features:
         df[col] = pd.to_numeric(df[col], errors='coerce')
         df[col] = df[col].fillna(df[col].mean())
-        logger.info(f"[NUMERIC] {col} - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean():.2f}")
+        print(f"[NUMERIC] {col} - min: {df[col].min()}, max: {df[col].max()}, mean: {df[col].mean():.2f}")
 
     legal_status_mapping = {
         'Sổ đỏ': 'Have certificate',
@@ -55,7 +55,7 @@ def prepare_data():
     # Điền giá trị thiếu cho các cột phân loại
     for col in categorical_features:
         df[col] = df[col].fillna('null')
-        logger.info(f"[CATEGORICAL] {col} unique values: {df[col].unique()}")
+        print(f"[CATEGORICAL] {col} unique values: {df[col].unique()}")
 
     # One-Hot Encoding
     df = pd.get_dummies(df, columns=categorical_features, drop_first=False)
@@ -75,7 +75,7 @@ def prepare_data():
 
 
 def train_model(X, y, features):
-    logger.info("\n=== HUẤN LUYỆN VÀ ĐÁNH GIÁ MÔ HÌNH ===")
+    print("\n=== HUẤN LUYỆN VÀ ĐÁNH GIÁ MÔ HÌNH ===")
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     scaler = StandardScaler()
@@ -85,10 +85,10 @@ def train_model(X, y, features):
     linear = LinearRegression().fit(X_train_scaled, y_train)
     #Ridge regression
     ridge = RidgeCV(alphas=np.logspace(-3, 2, 50), cv=5).fit(X_train_scaled, y_train)
-    logger.info(f"Ridge alpha selected: {ridge.alpha_:.6f}")
+    print(f"Ridge alpha selected: {ridge.alpha_:.6f}")
     #Lasso regression
     lasso = LassoCV(alphas=np.logspace(-3, 2, 50), cv=5, max_iter=10000).fit(X_train_scaled, y_train)
-    logger.info(f"Lasso alpha selected: {lasso.alpha_:.6f}")
+    print(f"Lasso alpha selected: {lasso.alpha_:.6f}")
     
     models = {
         'Linear': linear,
@@ -96,7 +96,7 @@ def train_model(X, y, features):
         'Lasso': lasso
     }
     
-    logger.info("\n=== KẾT QUẢ ĐÁNH GIÁ CÁC MÔ HÌNH ===")
+    print("\n=== KẾT QUẢ ĐÁNH GIÁ CÁC MÔ HÌNH ===")
     
     for name, model in models.items():
         train_r2 = cross_val_score(model, X_train_scaled, y_train, cv=5, scoring='r2').mean()
@@ -104,14 +104,14 @@ def train_model(X, y, features):
         test_r2 = r2_score(y_test, test_pred)
         test_rmse = np.sqrt(mean_squared_error(y_test, test_pred))
         
-        logger.info(f"{name} - R² Score (train): {train_r2:.4f}")
-        logger.info(f"{name} - R² Score (test): {test_r2:.4f}")
-        logger.info(f"{name} - RMSE (test): {test_rmse:.2f} ")
+        print(f"{name} - R² Score (train): {train_r2:.4f}")
+        print(f"{name} - R² Score (test): {test_r2:.4f}")
+        print(f"{name} - RMSE (test): {test_rmse:.2f} ")
     
     # chọn model tốt nhất dựa trên R² Score
     best_model_name = max(models.keys(), key=lambda name: r2_score(y_test, models[name].predict(X_test_scaled)))
     best_model = models[best_model_name]
-    logger.info(f"\nBest model selected: {best_model_name}")
+    print(f"\nBest model selected: {best_model_name}")
     
     y_pred = best_model.predict(X_test_scaled)
     
@@ -121,13 +121,13 @@ def train_model(X, y, features):
     joblib.dump(best_model, MODEL_PATH)
     joblib.dump(scaler, SCALER_PATH)
     joblib.dump(features, FEATURES_PATH)
-    logger.info("Đã lưu mô hình và thông tin thành công")
+    print("Đã lưu mô hình và thông tin thành công")
     return best_model, scaler
 
 
 def analyze_coefficients(model, features, X, y, model_name):
     """Phân tích hệ số hồi quy và hiển thị phương trình"""
-    logger.info("\n=== PHÂN TÍCH HỆ SỐ HỒI QUY ===")
+    print("\n=== PHÂN TÍCH HỆ SỐ HỒI QUY ===")
     
     if hasattr(model, 'coef_') and len(model.coef_) == len(features):
         try:
@@ -137,7 +137,7 @@ def analyze_coefficients(model, features, X, y, model_name):
                 'Abs_Coefficient': abs(model.coef_)
             }).sort_values('Abs_Coefficient', ascending=False)
             
-            logger.info(f"\nPhương trình hồi quy tuyến tính ({model_name}):")
+            print(f"\nPhương trình hồi quy tuyến tính ({model_name}):")
             
             significant_coefs = [(f"({coef:.4f})×{feat}", coef) for feat, coef in zip(features, model.coef_) if abs(coef) > 1e-4]
             equation_terms = [term for term, _ in significant_coefs]
@@ -148,11 +148,11 @@ def analyze_coefficients(model, features, X, y, model_name):
             else:
                 equation = "Price = " + " + ".join(equation_terms)
                 
-            logger.info(equation)
+            print(equation)
             
-            logger.info("\nTop 10 features ảnh hưởng lớn nhất:")
+            print("\nTop 10 features ảnh hưởng lớn nhất:")
             for idx, row in importance.head(10).iterrows():
-                logger.info(f"{row['Feature']}: {row['Coefficient']:+.4f}")
+                print(f"{row['Feature']}: {row['Coefficient']:+.4f}")
             
             # Vẽ biểu đồ
             plt.figure(figsize=(10, 6))
@@ -196,10 +196,10 @@ def main():
     
     correlation_matrix = data_with_price.corr()
     
-    logger.info("\nTop 10 features có tương quan mạnh nhất với giá:")
+    print("\nTop 10 features có tương quan mạnh nhất với giá:")
     correlations_with_price = correlation_matrix['Price'].abs()
     correlations_with_price = correlations_with_price[correlations_with_price.index != 'Price']
-    logger.info(correlations_with_price.sort_values(ascending=False).head(10))
+    print(correlations_with_price.sort_values(ascending=False).head(10))
     
     train_model(X, y, features)
 
